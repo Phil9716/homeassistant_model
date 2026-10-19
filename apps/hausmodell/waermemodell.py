@@ -370,8 +370,7 @@ class Hausmodell(hass.Hass):
         temps = None
         if self.e_weather:
             try:
-                r = self.call_service("weather/get_forecasts", entity_id=self.e_weather,
-                                      type="hourly", return_result=True)
+                r = self.call_service("weather/get_forecasts", entity_id=self.e_weather, type="hourly")
                 fc = (r or {}).get("result", r or {}).get("response", r or {})
                 fc = fc.get(self.e_weather, {}).get("forecast", []) if isinstance(fc, dict) else []
                 hourly = [float(f["temperature"]) for f in fc if "temperature" in f]
