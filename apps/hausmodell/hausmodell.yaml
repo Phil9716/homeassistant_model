@@ -33,3 +33,15 @@ hausmodell:
 hausmodell_updater:
   module: updater
   class: Updater
+  dateien: [waermemodell.py, wpmodell.py, updater.py, hausmodell.yaml]
+
+wpmodell:
+  module: wpmodell
+  class: WPModell
+  leistung_elektrisch: sensor.heating_vhp_hmu_currentconsumedpower
+  leistung_thermisch: sensor.heating_vhp_hmu_currentyieldpower
+  vorlauf: sensor.heating_vhp_hmu_flowtemp
+  aussentemperatur: sensor.heating_vhp_broadcast_outsidetemp
+  max_vorlauf_heizen: 45
+  lern_tage: 30
+  speicher: /config/wpmodell_state.json
