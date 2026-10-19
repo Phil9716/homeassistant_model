@@ -29,3 +29,7 @@ hausmodell:
     - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk5, durchfluss: input_number.durchfluss_fbh_oben_hk5}
     - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk6, durchfluss: input_number.durchfluss_fbh_oben_hk6}
     - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk7, durchfluss: input_number.durchfluss_fbh_oben_hk7}
+
+hausmodell_updater:
+  module: updater
+  class: Updater

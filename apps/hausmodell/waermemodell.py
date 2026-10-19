@@ -43,6 +43,11 @@ BOUNDS_LO = np.log([3e-4, 1.5e-3, 1e6, 5e6, 0.0001])
 BOUNDS_HI = np.log([1e-2, 3e-2, 5e7, 3e8, 2.0])
 
 
+def _s(value):
+    """AppDaemon verwirft "falsy" Zustände wie 0.0 – daher immer als Text übergeben."""
+    return str(value)
+
+
 def simulate(params, T_i0, T_s0, T_a, Q, P_pv):
     """Explizite Euler-Simulation über alle Zeitschritte."""
     R_is, R_ia, C_i, C_s, a_sol = (params[k] for k in PARAM_KEYS)
@@ -303,11 +308,11 @@ class Hausmodell(hass.Hass):
 
     def _publish_model(self):
         s = self._summary()
-        self.set_state("sensor.hausmodell_waermeverlust", state=s["H_W_per_K"],
+        self.set_state("sensor.hausmodell_waermeverlust", state=_s(s["H_W_per_K"]),
                        attributes={"unit_of_measurement": "W/K", "friendly_name": "Hausmodell Wärmeverlust H",
                                    "icon": "mdi:home-export-outline", "state_class": "measurement", **s})
         rmse = self.fit_info.get("rmse_48h")
-        self.set_state("sensor.hausmodell_guete", state=rmse if rmse is not None else "unknown",
+        self.set_state("sensor.hausmodell_guete", state=_s(rmse if rmse is not None else "unknown"),
                        attributes={"unit_of_measurement": "K", "friendly_name": "Hausmodell Vorhersagefehler (48 h)",
                                    "icon": "mdi:target", "state_class": "measurement", **self.fit_info})
 
@@ -351,11 +356,11 @@ class Hausmodell(hass.Hass):
         self.x = self.x + K @ innov
         self.P = (np.eye(2) - K @ Hm) @ self.P
 
-        self.set_state("sensor.hausmodell_estrich_temperatur", state=round(float(self.x[1]), 2),
+        self.set_state("sensor.hausmodell_estrich_temperatur", state=_s(round(float(self.x[1]), 2)),
                        attributes={"unit_of_measurement": "°C", "device_class": "temperature",
                                    "state_class": "measurement", "friendly_name": "Hausmodell Estrichtemperatur (geschätzt)",
                                    "icon": "mdi:floor-plan", "innovation_raum_K": round(float(innov[0]), 3)})
-        self.set_state("sensor.hausmodell_heizleistung", state=round(q),
+        self.set_state("sensor.hausmodell_heizleistung", state=_s(round(q)),
                        attributes={"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement",
                                    "friendly_name": "Hausmodell Heizleistung (Durchfluss × Spreizung)", "icon": "mdi:radiator"})
         self._forecast(ta)
@@ -394,10 +399,10 @@ class Hausmodell(hass.Hass):
         now = datetime.now()
         series = [{"t": (now + timedelta(minutes=DT_MIN * k)).strftime("%H:%M"), "Ti": round(float(Ti[k]), 2)}
                   for k in range(0, steps, 4)]
-        self.set_state("sensor.hausmodell_auskuehlzeit", state=hours,
+        self.set_state("sensor.hausmodell_auskuehlzeit", state=_s(hours),
                        attributes={"unit_of_measurement": "h", "friendly_name": "Hausmodell Auskühlzeit ohne Heizen", "grenze_temperatur": self.t_min,
                                    "icon": "mdi:timer-sand", "prognose_ohne_heizen": series,
                                    "aussentemp_mittel_24h": round(float(np.mean(ta)), 1)})
-        self.set_state("sensor.hausmodell_waermebedarf_24h", state=round(demand_kwh, 1),
+        self.set_state("sensor.hausmodell_waermebedarf_24h", state=_s(round(demand_kwh, 1)),
                        attributes={"unit_of_measurement": "kWh", "friendly_name": "Hausmodell Wärmebedarf nächste 24 h",
                                    "icon": "mdi:fire", "soll_temperatur": self.t_soll})
