@@ -46,6 +46,10 @@ class WPModell(hass.Hass):
         self.e_ta = a["aussentemperatur"]
         self.max_vl_heizen = float(a.get("max_vorlauf_heizen", 45))   # darüber: Warmwasser
         self.days = int(a.get("lern_tage", 30))
+        # Ersatzquellen in W, falls die eBUS-Werte (kW) dauerhaft 0 liefern
+        self.e_pel_fb = a.get("leistung_elektrisch_ersatz")
+        self.e_pth_fb = a.get("leistung_thermisch_ersatz")
+        self.poll = a.get("ebus_abfragen", [])
         self.store = a.get("speicher", "/config/wpmodell_state.json")
         self.p = dict(DEFAULT)
         self.info = {"status": "noch nicht gelernt"}
@@ -64,6 +68,15 @@ class WPModell(hass.Hass):
         self.run_every(self.live, "now+20", 300)
         self.listen_event(lambda *a: self.learn({}), "wpmodell_lernen")
         self.run_in(self.learn, 45)
+        # eBUS-Abfrage anmelden (ebusd vergisst das bei jedem Neustart) – stündlich erneuern
+        self.run_every(self.register_poll, "now+5", 3600)
+
+    def register_poll(self, kwargs):
+        for topic in self.poll:
+            try:
+                self.call_service("mqtt/publish", topic=topic, payload="?1")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"eBUS-Abfrage {topic} fehlgeschlagen: {e}", level="WARNING")
 
     # ------------------------------------------------------------ helpers
     def _f(self, e):
@@ -93,12 +106,18 @@ class WPModell(hass.Hass):
     def learn(self, kwargs):
         end = pd.Timestamp.now(tz="UTC").floor("15min")
         idx = pd.date_range(end - pd.Timedelta(days=self.days), end, freq="15min")
-        df = pd.DataFrame({"pel": self._hist(self.e_pel, idx), "pth": self._hist(self.e_pth, idx),
+        pel, pth = self._hist(self.e_pel, idx), self._hist(self.e_pth, idx)
+        quelle = "eBUS"
+        if (pel.max(skipna=True) or 0) <= 0 and self.e_pel_fb:
+            pel, quelle = self._hist(self.e_pel_fb, idx) / 1000.0, "Ersatz"
+        if (pth.max(skipna=True) or 0) <= 0 and self.e_pth_fb:
+            pth, quelle = self._hist(self.e_pth_fb, idx) / 1000.0, "Ersatz"
+        df = pd.DataFrame({"pel": pel, "pth": pth,
                            "vl": self._hist(self.e_vl, idx), "ta": self._hist(self.e_ta, idx)}).dropna()
         run = df[(df.pel > 0.25) & (df.pth > 0.5) & (df.vl < self.max_vl_heizen) & (df.vl > 18)]
         run = run.assign(cop=run.pth / run.pel)
         run = run[(run.cop > 1.0) & (run.cop < 9.0)]
-        self.log(f"WP-Daten: {len(df)} Zeilen, davon Heizbetrieb {len(run)}")
+        self.log(f"WP-Daten ({quelle}): {len(df)} Zeilen, davon Heizbetrieb {len(run)}")
 
         # Leistungsgrenzen je Außentemperatur-Band (braucht nur wenige Punkte)
         limits = {}
@@ -112,7 +131,7 @@ class WPModell(hass.Hass):
             self.limits = limits
 
         if len(run) < 40:
-            self.info = {"status": f"zu wenig Heizbetrieb ({len(run)} Viertelstunden, mind. 40)",
+            self.info = {"status": f"zu wenig Heizbetrieb ({len(run)} Viertelstunden, mind. 40)", "quelle": quelle,
                          "zeit": datetime.now().isoformat(timespec="minutes")}
             self._save()
             self._publish()
@@ -129,7 +148,7 @@ class WPModell(hass.Hass):
         pred = cop_model(self.p["eta"], self.p["d"], run.vl.values, run.ta.values)
         rmse = float(np.sqrt(np.mean((pred - run.cop.values) ** 2)))
         self.info = {"status": "ok", "zeit": datetime.now().isoformat(timespec="minutes"),
-                     "viertelstunden": int(len(run)), "rmse_cop": round(rmse, 2),
+                     "viertelstunden": int(len(run)), "rmse_cop": round(rmse, 2), "quelle": quelle,
                      "aussentemp_bereich": [round(float(run.ta.min()), 1), round(float(run.ta.max()), 1)]}
         self.log(f"WP gelernt: {self.p} {self.info}")
         self._save()

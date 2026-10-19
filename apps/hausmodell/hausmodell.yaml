@@ -45,3 +45,10 @@ wpmodell:
   max_vorlauf_heizen: 45
   lern_tage: 30
   speicher: /config/wpmodell_state.json
+  leistung_elektrisch_ersatz: sensor.home_device_0_arotherm_plus_current_power
+  leistung_thermisch_ersatz: sensor.hausmodell_heizleistung
+  ebus_abfragen:
+    - vhp/hmu/CurrentConsumedPower/get
+    - vhp/hmu/CurrentYieldPower/get
+    - vhp/hmu/BuildingCircuitFlow/get
+    - vhp/hmu/FlowTemp/get
