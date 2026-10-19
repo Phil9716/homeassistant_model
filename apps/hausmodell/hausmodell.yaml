@@ -1,0 +1,31 @@
+hausmodell:
+  module: waermemodell
+  class: Hausmodell
+  raumtemperatur:
+    - sensor.temperatur_wohnzimmer_temperature
+    - sensor.temperatur_kuche_temperature
+    - sensor.temperatur_badezimmer_temperature
+  aussentemperatur: sensor.heating_vhp_broadcast_outsidetemp
+  pv_leistung: sensor.wechselrichter_master_pv_erzeugung_summe
+  vorlauf: sensor.heizkreis_unten_vorlauf
+  bad_temperatur: sensor.temperatur_badezimmer_temperature
+  wetter: weather.baesweiler
+  komfort_min: 20.5
+  komfort_soll: 21.5
+  lern_tage: 21
+  speicher: /config/hausmodell_state.json
+  heizkreise:
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk1, durchfluss: input_number.durchfluss_fbh_unten_hk1}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk2, durchfluss: input_number.durchfluss_fbh_unten_hk2}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk3, durchfluss: input_number.durchfluss_fbh_unten_hk3}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk4, durchfluss: input_number.durchfluss_fbh_unten_hk4}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk5, durchfluss: input_number.durchfluss_fbh_unten_hk5}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk6, durchfluss: input_number.durchfluss_fbh_unten_hk6}
+    - {ruecklauf: sensor.heizkreis_unten_r_cklauf_hk7, durchfluss: input_number.durchfluss_fbh_unten_hk7}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk1, durchfluss: input_number.durchfluss_fbh_oben_hk1}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk2, durchfluss: input_number.durchfluss_fbh_oben_hk2}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk3, durchfluss: input_number.durchfluss_fbh_oben_hk3}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk4, durchfluss: input_number.durchfluss_fbh_oben_hk4}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk5, durchfluss: input_number.durchfluss_fbh_oben_hk5}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk6, durchfluss: input_number.durchfluss_fbh_oben_hk6}
+    - {ruecklauf: sensor.heizkreisverteiler_oben_r_cklauf_hk7, durchfluss: input_number.durchfluss_fbh_oben_hk7}
