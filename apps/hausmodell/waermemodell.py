@@ -352,6 +352,19 @@ class Hausmodell(hass.Hass):
         self.log(f"Gelernt: {self.fit_info} -> {self._summary()}")
         self._publish_model()
 
+    def planning_params(self, max_rmse=0.5):
+        """Parameter für die Planung: gelernte, wenn sie gut genug vorhersagen, sonst die Startwerte."""
+        rmse = self.fit_info.get("rmse_48h")
+        lo, hi = np.exp(BOUNDS_LO), np.exp(BOUNDS_HI)
+        at_bound = [k for i, k in enumerate(PARAM_KEYS[:4])
+                    if self.params[k] <= lo[i] * 1.02 or self.params[k] >= hi[i] * 0.98]
+        if rmse is not None and rmse <= max_rmse and not at_bound:
+            return dict(self.params), f"gelernt (±{rmse} K)"
+        why = f"Fehler {rmse} K" if rmse is not None else "noch nicht gelernt"
+        if at_bound:
+            why += f", am Rand: {', '.join(at_bound)}"
+        return dict(DEFAULT_PARAMS), f"Startwerte ({why})"
+
     def _summary(self):
         p = self.params
         H = 1.0 / p["R_ia"]

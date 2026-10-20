@@ -138,7 +138,7 @@ class Optimierer(hass.Hass):
         a = self.args
         self.cfg = {
             "preis": float(a.get("strompreis", 0.30)),
-            "strafe_kalt": float(a.get("strafe_kalt_eur_kh", 0.6)),
+            "strafe_kalt": float(a.get("strafe_kalt_eur_kh", 0.3)),
             "strafe_warm": float(a.get("strafe_warm_eur_kh", 0.2)),
             "restwert_akku": float(a.get("restwert_akku_eur_kwh", 0.15)),
             "akku_kwh": float(a.get("akku_nutzbar_kwh", 7.6)),
@@ -155,7 +155,9 @@ class Optimierer(hass.Hass):
         self.schwelle_kw = float(a.get("einschalt_schwelle_kw", 1.5))
         self.min_lauf = int(a.get("mindestlaufzeit_min", 60))
         self.min_pause = int(a.get("mindestpause_min", 30))
-        self.ua_fbh = float(a.get("fbh_kw_pro_k", 0.6))
+        self.ua_fbh = float(a.get("fbh_kw_pro_k", 1.0))
+        self.max_rmse = float(a.get("lernmodell_max_fehler_k", 0.5))
+        self.modell_info = ""
         self.e = a["entitaeten"]
         self.raeume = a.get("raeume", {})
         self.pv_entities = a.get("pv_prognose", [])
@@ -296,7 +298,8 @@ class Optimierer(hass.Hass):
         soc = self._f(self.e["akku_soc"], 0.0) / 100.0 * self.cfg["akku_kwh"]
         t_min = self._t_min(idx)
         x0 = np.array(haus.x, float)
-        res = plan(dict(haus.params), x0, ta, pv, base, cop, t_min, np.full(len(ta), self.t_max), soc, self.cfg)
+        params, self.modell_info = haus.planning_params(self.max_rmse)
+        res = plan(params, x0, ta, pv, base, cop, t_min, np.full(len(ta), self.t_max), soc, self.cfg)
         if res is None:
             self.log("Optimierung nicht lösbar", level="WARNING")
             self.set_state("sensor.optimierer_plan", state="Fehler",
@@ -375,7 +378,8 @@ class Optimierer(hass.Hass):
             "netz_24h_kwh": round(float(res["g"][day].sum() * DT_H), 1),
             "kosten_24h_eur": round(float(res["g"][day].sum() * DT_H * self.cfg["preis"]), 2),
             "pv_prognose_ok": pv_ok, "wetter_prognose_ok": ta_ok,
-            "akku_start_kwh": round(soc, 2), "zeit": datetime.now().strftime("%H:%M")})
+            "akku_start_kwh": round(float(soc), 2), "planungsmodell": self.modell_info,
+            "zeit": datetime.now().strftime("%H:%M")})
         # Raumprognosen unter dem geplanten Fahrplan
         ti_now = float(haus.x[0])
         k = np.arange(1, len(idx) + 1)

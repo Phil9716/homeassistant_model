@@ -64,6 +64,8 @@ optimierer:
   akku_eta_laden: 0.95          # zusammen ~0,80 hin und zurück (Gesamtzähler 1996/1603 kWh)
   akku_eta_entladen: 0.85
   heizleistung_max_kw: 8.0
+  strafe_kalt_eur_kh: 0.3       # €/(K·h) unter Komfort – verhindert Netzheizen bei unsicherem Modell
+  lernmodell_max_fehler_k: 0.5  # gelerntes Modell erst ab dieser Güte für die Planung
   t_min_tag: 21.0               # Leiträume 06–22 Uhr
   t_min_nacht: 20.5
   t_max: 23.5
