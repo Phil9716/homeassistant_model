@@ -34,6 +34,12 @@ def _s(v):
     return str(v)
 
 
+def _nz(v, nd=2):
+    """AppDaemon entfernt 0-Werte aus Attributen – daher exakte Nullen durch 0.0001 ersetzen."""
+    r = round(float(v), nd)
+    return r if r != 0 else 0.0001
+
+
 def _find_forecast(obj):
     """Sucht in einer beliebig verschachtelten Service-Antwort die Liste 'forecast'."""
     if isinstance(obj, dict):
@@ -362,7 +368,7 @@ class Optimierer(hass.Hass):
         ms = [int(t.timestamp() * 1000) for t in idx]
 
         def series(arr, nd=2):
-            return [[m, round(float(v), nd)] for m, v in zip(ms, arr)]
+            return [[m, _nz(v, nd)] for m, v in zip(ms, arr)]
 
         day = slice(0, 96)
         self.set_state("sensor.optimierer_plan", state=_s(round(float(res["q"][:4].mean()), 2)), attributes={
@@ -373,12 +379,12 @@ class Optimierer(hass.Hass):
             "pv_kw": series(pv / 1000.0), "grundlast_kw": series(base),
             "raum_plan": series(res["ti"]), "raum_ohne_heizen": series(res["ti_frei"]),
             "aussen": series(ta, 1), "cop": series(cop),
-            "waerme_24h_kwh": round(float(res["q"][day].sum() * DT_H), 1),
-            "wp_strom_24h_kwh": round(float(res["p_el"][day].sum() * DT_H), 1),
-            "netz_24h_kwh": round(float(res["g"][day].sum() * DT_H), 1),
-            "kosten_24h_eur": round(float(res["g"][day].sum() * DT_H * self.cfg["preis"]), 2),
+            "waerme_24h_kwh": _nz(res["q"][day].sum() * DT_H, 1),
+            "wp_strom_24h_kwh": _nz(res["p_el"][day].sum() * DT_H, 1),
+            "netz_24h_kwh": _nz(res["g"][day].sum() * DT_H, 1),
+            "kosten_24h_eur": _nz(res["g"][day].sum() * DT_H * self.cfg["preis"], 2),
             "pv_prognose_ok": pv_ok, "wetter_prognose_ok": ta_ok,
-            "akku_start_kwh": round(float(soc), 2), "planungsmodell": self.modell_info,
+            "akku_start_kwh": _nz(soc), "planungsmodell": self.modell_info,
             "zeit": datetime.now().strftime("%H:%M")})
         # Raumprognosen unter dem geplanten Fahrplan
         ti_now = float(haus.x[0])
@@ -395,5 +401,5 @@ class Optimierer(hass.Hass):
                 "friendly_name": f"Prognose {name} (+6 h)", "unit_of_measurement": "°C",
                 "device_class": "temperature", "state_class": "measurement", "icon": "mdi:crystal-ball",
                 "prognose": series(pred, 1), "gemessen_jetzt": meas, "quelle": ent,
-                "abgleich": f, "min_24h": round(float(pred[:96].min()), 1),
-                "max_24h": round(float(pred[:96].max()), 1)})
+                "abgleich": f, "min_24h": _nz(pred[:96].min(), 1),
+                "max_24h": _nz(pred[:96].max(), 1)})
