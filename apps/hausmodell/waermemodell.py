@@ -43,7 +43,7 @@ DEFAULT_PARAMS = {
 }
 PRIOR_SIGMA = np.array([0.7, 0.5, 0.7, 0.6, 1.0])   # Streuung im Log-Raum (0,7 ≈ Faktor 2)
 SIGMA_T = 0.3                                       # erwartete Messabweichung Raumtemperatur [K]
-MODEL_VERSION = 2                                   # 2: Heizwärme = P_el × COP
+MODEL_VERSION = 3                                   # 2: Heizwärme = P_el × COP, 3: Leiträume EG + Bad
 PARAM_KEYS = list(DEFAULT_PARAMS.keys())
 # Physikalisch plausible Bereiche (EFH mit FBH): H 60–400 W/K, Raum 0,5–5 kWh/K, Estrich 2–25 kWh/K
 BOUNDS_LO = np.log([2e-4, 2.5e-3, 1.8e6, 7.2e6, 0.0001])

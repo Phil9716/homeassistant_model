@@ -2,8 +2,7 @@ hausmodell:
   module: waermemodell
   class: Hausmodell
   raumtemperatur:
-    - sensor.temperatur_wohnzimmer_temperature
-    - sensor.temperatur_kuche_temperature
+    - sensor.temperatur_eg_temperature          # Leiträume: EG und Bad
     - sensor.temperatur_badezimmer_temperature
   aussentemperatur: sensor.heating_vhp_broadcast_outsidetemp
   pv_leistung: sensor.wechselrichter_master_pv_erzeugung_summe
@@ -105,8 +104,8 @@ optimierer:
     - sensor.energy_production_d2_2
     - sensor.energy_production_d2_3
   raeume:
-    Wohnzimmer: sensor.temperatur_wohnzimmer_temperature
-    Küche: sensor.temperatur_kuche_temperature
+    EG: sensor.temperatur_eg_temperature
+    Philipp: sensor.temperatur_philipp_temperature
     Bad: sensor.temperatur_badezimmer_temperature
     Schlafzimmer: sensor.temperatur_schlafzimmer_temperature
     Kinderzimmer: sensor.temperatur_kinderzimmer_temperature
@@ -134,8 +133,8 @@ prognose:
       ist: sensor.garage_west
       prognose: [sensor.energy_production_today_2, sensor.energy_production_tomorrow_west, sensor.energy_production_d2_2]
   raeume:
-    Wohnzimmer: sensor.prognose_wohnzimmer
-    Küche: sensor.prognose_kueche
+    EG: sensor.prognose_eg
+    Philipp: sensor.prognose_philipp
     Bad: sensor.prognose_bad
     Schlafzimmer: sensor.prognose_schlafzimmer
     Kinderzimmer: sensor.prognose_kinderzimmer
