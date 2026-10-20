@@ -75,6 +75,10 @@ class Hausmodell(hass.Hass):
         self.e_ta = a["aussentemperatur"]
         self.e_pv = a["pv_leistung"]
         self.e_vl = a["vorlauf"]
+        # Heizwärme = elektrische WP-Leistung × COP, nur wenn die WP wirklich in die FBH heizt.
+        # Ohne diese Angabe: alter Weg über Durchfluss × Spreizung (unsicher bei stehender Pumpe).
+        self.e_pel = a.get("wp_leistung")
+        self.pel_min = float(a.get("wp_laeuft_ab_w", 200))
         self.circuits = a["heizkreise"]          # Liste {ruecklauf, durchfluss}
         self.e_bad = a.get("bad_temperatur")
         self.e_weather = a.get("wetter")
@@ -127,11 +131,33 @@ class Hausmodell(hass.Hass):
         except (TypeError, ValueError):
             return default
 
-    def _heat_now(self):
-        """Aktuelle Heizleistung in W aus Durchfluss × (Vorlauf − Rücklauf)."""
+    def _cop(self, vl, ta):
+        """COP aus dem WP-Modell (falls geladen), sonst Carnot-Schätzung mit Gütegrad 0,45."""
+        try:
+            wp = self.get_app("wpmodell")
+            eta, d = wp.p["eta"], wp.p["d"]
+        except Exception:  # noqa: BLE001
+            eta, d = 0.45, 0.10
+        vl, ta = np.asarray(vl, float), np.asarray(ta, float)
+        th = vl + 273.15 + 3.0
+        tc = ta + 273.15 - 5.0
+        cop = eta * th / np.maximum(th - tc, 5.0) * (1 - d * np.exp(-((ta - 1.0) / 3.5) ** 2))
+        return np.clip(cop, 1.5, 7.0)
+
+    def _running(self, pel, vl, ti):
+        """WP heizt in die FBH: Strom fließt und der Verteiler-Vorlauf liegt deutlich über Raum."""
+        return pel is not None and vl is not None and ti is not None and pel > self.pel_min and vl - ti > 3.0
+
+    def _heat_now(self, ti=None, ta=None):
+        """Aktuelle Heizleistung in W."""
         vl = self._f(self.e_vl)
         if vl is None:
             return None
+        if self.e_pel:
+            pel = self._f(self.e_pel, 0.0)
+            if not self._running(pel, vl, ti):
+                return 0.0
+            return float(pel * self._cop(vl, ta if ta is not None else 10.0))
         q = 0.0
         for c in self.circuits:
             rl = self._f(c["ruecklauf"])
@@ -141,15 +167,17 @@ class Hausmodell(hass.Hass):
             q += fl * CP_WATER * max(vl - rl, 0.0)
         return q
 
-    def _slab_measurement(self):
-        """Mittlerer Rücklauf als Messwert für die Estrichtemperatur (nur bei Durchströmung)."""
+    def _slab_measurement(self, ti=None):
+        """Mittlerer Rücklauf als Messwert für die Estrichtemperatur – nur bei Durchströmung."""
         vl = self._f(self.e_vl)
         rls = [self._f(c["ruecklauf"]) for c in self.circuits]
         rls = [r for r in rls if r is not None]
         if vl is None or not rls:
             return None
         rl = float(np.mean(rls))
-        return rl if (vl - rl) > 1.0 else None   # Pumpe läuft, Wasser durchströmt Estrich
+        if self.e_pel and not self._running(self._f(self.e_pel, 0.0), vl, ti):
+            return None
+        return rl if (vl - rl) > 0.5 else None
 
     # ------------------------------------------------------------ history
     def _history(self, entity, start):
@@ -186,16 +214,21 @@ class Hausmodell(hass.Hass):
         df["Ta"] = self._grid(self._history(self.e_ta, st), idx)
         df["Ppv"] = self._grid(self._history(self.e_pv, st), idx).fillna(0).clip(lower=0)
         vl = self._grid(self._history(self.e_vl, st), idx)
-        q = pd.Series(0.0, index=idx)
-        rl_all = []
-        for c in self.circuits:
-            rl = self._grid(self._history(c["ruecklauf"], st), idx)
-            fl = self._f(c["durchfluss"], 0.0)
-            q += (fl * CP_WATER * (vl - rl).clip(lower=0)).fillna(0)
-            rl_all.append(rl)
-        df["Q"] = q
+        rl_all = [self._grid(self._history(c["ruecklauf"], st), idx) for c in self.circuits]
         rl_mean = pd.concat(rl_all, axis=1).mean(axis=1)
-        df["Ts_meas"] = rl_mean.where((vl - rl_mean) > 1.0)
+        if self.e_pel:
+            pel = self._grid(self._history(self.e_pel, st), idx).fillna(0)
+            running = (pel > self.pel_min) & ((vl - df["Ti"]) > 3.0)
+            cop = pd.Series(self._cop(vl.fillna(30).values, df["Ta"].fillna(10).values), index=idx)
+            df["Q"] = (pel * cop).where(running, 0.0).fillna(0)
+            df["Ts_meas"] = rl_mean.where(running & ((vl - rl_mean) > 0.5))
+        else:
+            q = pd.Series(0.0, index=idx)
+            for c, rl in zip(self.circuits, rl_all):
+                fl = self._f(c["durchfluss"], 0.0)
+                q += (fl * CP_WATER * (vl - rl).clip(lower=0)).fillna(0)
+            df["Q"] = q
+            df["Ts_meas"] = rl_mean.where((vl - rl_mean) > 1.0)
         self.log(f"Datensatz: {len(df)} Zeilen, gültig Ti={df['Ti'].notna().sum()}, "
                  f"Ta={df['Ta'].notna().sum()}, Estrich-Messung={df['Ts_meas'].notna().sum()}")
         return df.dropna(subset=["Ti", "Ta"])
@@ -328,13 +361,13 @@ class Hausmodell(hass.Hass):
         ta = self._f(self.e_ta)
         if ti is None or ta is None:
             return
-        q = self._heat_now() or 0.0
+        q = self._heat_now(ti, ta) or 0.0
         ppv = max(self._f(self.e_pv, 0.0), 0.0)
         p = self.params
         R_is, R_ia, C_i, C_s, a_sol = (p[k] for k in PARAM_KEYS)
 
         if self.x is None:
-            ts_m = self._slab_measurement()
+            ts_m = self._slab_measurement(ti)
             self.x = np.array([ti, ts_m if ts_m is not None else ti + 1.0])
 
         # Vorhersage-Schritt (lineares System)
@@ -346,7 +379,7 @@ class Hausmodell(hass.Hass):
         self.P = A @ self.P @ A.T + Qn
 
         # Mess-Schritt: Raumtemperatur immer, Estrich über Rücklauf wenn durchströmt
-        ts_m = self._slab_measurement()
+        ts_m = self._slab_measurement(ti)
         if ts_m is not None:
             Hm = np.eye(2)
             z = np.array([ti, ts_m])

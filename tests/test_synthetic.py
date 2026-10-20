@@ -76,6 +76,21 @@ def main():
     app.step({})
     print("OK", app.out)
 
+    # Variante mit elektrischer WP-Leistung × COP als Wärmequelle (wie in der echten Anlage)
+    cop = app._cop(vl, Ta)
+    pel = np.where(Q > 0, Q / cop, 8.0)
+    hist["s.pel"] = mk(pel)
+    rl_still = np.where(Q > 0, rl, rl - 3)      # stehende Pumpe: Rücklauffühler kühlen ab
+    hist["s.rl"] = mk(rl_still)
+    args2 = dict(args, wp_leistung="s.pel", speicher=os.path.join(tempfile.mkdtemp(), "s2.json"))
+    app2 = hm.Hausmodell(args2, hist, dict(states, **{"s.pel": "2000"}))
+    app2.initialize()
+    app2.learn({})
+    s2 = app2._summary()
+    print(s2, app2.fit_info)
+    assert app2.fit_info["rmse_48h"] < 0.15, "Vorhersagefehler (P_el-Variante) zu groß"
+    assert abs(s2["H_W_per_K"] - 200) < 30, "Wärmeverlust (P_el-Variante) nicht wiedergefunden"
+
 
 if __name__ == "__main__":
     main()

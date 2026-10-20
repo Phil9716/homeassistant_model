@@ -9,6 +9,8 @@ hausmodell:
   pv_leistung: sensor.wechselrichter_master_pv_erzeugung_summe
   vorlauf: sensor.heizkreis_unten_vorlauf
   bad_temperatur: sensor.temperatur_badezimmer_temperature
+  wp_leistung: sensor.home_device_0_arotherm_plus_current_power   # W, myVaillant (eBUS liefert 0)
+  wp_laeuft_ab_w: 200
   wetter: weather.baesweiler
   komfort_min: 20.5
   komfort_soll: 21.5
@@ -71,7 +73,7 @@ optimierer:
   einschalt_schwelle_kw: 1.5
   mindestlaufzeit_min: 60
   mindestpause_min: 30
-  fbh_kw_pro_k: 0.6             # Wärmeabgabe Wasser→Estrich je K Übertemperatur (Startwert)
+  fbh_kw_pro_k: 1.0             # gemessen 19.10.: ~9 kW bei 36 °C Vorlauf / ~27 °C Estrich
   entitaeten:
     automatik: input_boolean.optimierer_automatik
     pv_boost_automatik: input_boolean.pv_boost_automatik
