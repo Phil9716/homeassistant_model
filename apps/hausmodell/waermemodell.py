@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 import appdaemon.plugins.hass.hassapi as hass
 import numpy as np
 import pandas as pd
+from scipy.linalg import expm
 from scipy.optimize import least_squares
 
 DT_MIN = 15                     # Zeitschritt in Minuten
@@ -31,16 +32,21 @@ DT = DT_MIN * 60.0              # in Sekunden
 CP_WATER = 1.163                # Wh/(l·K)
 
 # Startwerte (typisches EFH mit FBH) – werden durch das Lernen ersetzt
+# Startwerte und Priors (typisches EFH mit FBH): H ≈ 150 W/K, Raum ≈ 3 kWh/K, Estrich ≈ 12 kWh/K,
+# FBH-Kopplung Estrich→Raum ≈ 1,5 kW/K. Die Daten dürfen davon abweichen, müssen es aber "begründen".
 DEFAULT_PARAMS = {
-    "R_is": 0.0020,   # K/W   Estrich -> Raum
-    "R_ia": 0.0060,   # K/W   Raum -> außen  (H = 1/R ≈ 170 W/K)
-    "C_i": 8.0e6,     # J/K   Raumluft + Möbel + Wände (schnell)
-    "C_s": 4.0e7,     # J/K   Estrich (langsam)
-    "a_sol": 0.15,    # W/W   Anteil PV-Leistung als Solargewinn
+    "R_is": 6.7e-4,   # K/W   Estrich -> Raum
+    "R_ia": 6.7e-3,   # K/W   Raum -> außen  (H = 1/R ≈ 150 W/K)
+    "C_i": 1.08e7,    # J/K   Raumluft + Möbel + Wände (≈ 3 kWh/K)
+    "C_s": 4.3e7,     # J/K   Estrich (≈ 12 kWh/K)
+    "a_sol": 0.10,    # W/W   Anteil PV-Leistung als Solargewinn
 }
+PRIOR_SIGMA = np.array([0.7, 0.5, 0.7, 0.6, 1.0])   # Streuung im Log-Raum (0,7 ≈ Faktor 2)
+SIGMA_T = 0.3                                       # erwartete Messabweichung Raumtemperatur [K]
+MODEL_VERSION = 2                                   # 2: Heizwärme = P_el × COP
 PARAM_KEYS = list(DEFAULT_PARAMS.keys())
 # Physikalisch plausible Bereiche (EFH mit FBH): H 60–400 W/K, Raum 0,5–5 kWh/K, Estrich 2–25 kWh/K
-BOUNDS_LO = np.log([5e-4, 2.5e-3, 1.8e6, 7.2e6, 0.0001])
+BOUNDS_LO = np.log([2e-4, 2.5e-3, 1.8e6, 7.2e6, 0.0001])
 BOUNDS_HI = np.log([5e-3, 1.7e-2, 1.8e7, 9.0e7, 1.0])
 
 
@@ -49,20 +55,29 @@ def _s(value):
     return str(value)
 
 
+def discretize(p, dt=DT):
+    """Exakte Diskretisierung (Halteglied). Eingänge u = [T_a, P_pv, Q]. Stabil für alle Parameter."""
+    R_is, R_ia, C_i, C_s, a_sol = (p[k] for k in PARAM_KEYS)
+    M = np.zeros((5, 5))
+    M[:2, :2] = [[-(1 / R_is + 1 / R_ia) / C_i, 1 / (C_i * R_is)],
+                 [1 / (C_s * R_is), -1 / (C_s * R_is)]]
+    M[:2, 2:] = [[1 / (C_i * R_ia), a_sol / C_i, 0.0],
+                 [0.0, 0.0, 1 / C_s]]
+    E = expm(M * dt)
+    return E[:2, :2], E[:2, 2:]
+
+
 def simulate(params, T_i0, T_s0, T_a, Q, P_pv):
-    """Explizite Euler-Simulation über alle Zeitschritte."""
-    R_is, R_ia, C_i, C_s, a_sol = (params[k] for k in PARAM_KEYS)
+    """Simulation über alle Zeitschritte (exakt diskretisiert)."""
+    Ad, Bd = discretize(params)
     n = len(T_a)
-    Ti = np.empty(n)
-    Ts = np.empty(n)
-    ti, ts = T_i0, T_s0
+    U = np.column_stack([T_a, P_pv, Q])
+    X = np.empty((n, 2))
+    x = np.array([T_i0, T_s0], float)
     for k in range(n):
-        Ti[k], Ts[k] = ti, ts
-        dti = ((ts - ti) / R_is + (T_a[k] - ti) / R_ia + a_sol * P_pv[k]) / C_i
-        dts = ((ti - ts) / R_is + Q[k]) / C_s
-        ti += DT * dti
-        ts += DT * dts
-    return Ti, Ts
+        X[k] = x
+        x = Ad @ x + Bd @ U[k]
+    return X[:, 0], X[:, 1]
 
 
 class Hausmodell(hass.Hass):
@@ -106,6 +121,9 @@ class Hausmodell(hass.Hass):
         try:
             with open(self.store) as f:
                 s = json.load(f)
+            if s.get("fit_info", {}).get("version") != MODEL_VERSION:
+                self.log("Gespeicherte Parameter stammen aus einer älteren Modellversion – starte neu")
+                raise FileNotFoundError
             self.params.update(s.get("params", {}))
             # ältere Lernstände in die aktuellen Grenzen holen
             lo, hi = np.exp(BOUNDS_LO), np.exp(BOUNDS_HI)
@@ -276,18 +294,19 @@ class Hausmodell(hass.Hass):
             for i in starts:
                 sl = slice(i, i + win)
                 Ti, Ts = simulate(p, ti_v[i], ts_m[i], ta_v[sl], q_v[sl], pv_v[sl])
-                res.append(Ti - ti_v[sl])
+                res.append((Ti - ti_v[sl]) / SIGMA_T)
                 m = ts_m[sl]
                 ok = ~np.isnan(m)
                 if ok.any():   # Rückläufe stützen die Estrich-Schätzung (geringer gewichtet)
-                    res.append(0.3 * (Ts[ok] - m[ok]))
+                    res.append((Ts[ok] - m[ok]) / 1.0)
+            res.append((logp - np.log([DEFAULT_PARAMS[k] for k in PARAM_KEYS])) / PRIOR_SIGMA)
             r = np.concatenate(res)
             return np.nan_to_num(r, nan=0.0)
 
         def fit_from(x0):
             x0 = np.clip(x0, BOUNDS_LO + 1e-6, BOUNDS_HI - 1e-6)
             return least_squares(residuals, x0, bounds=(BOUNDS_LO, BOUNDS_HI),
-                                 loss="soft_l1", f_scale=0.3, max_nfev=600)
+                                 loss="soft_l1", f_scale=1.0, max_nfev=600)
 
         try:
             cands = [np.log([self.params[k] for k in PARAM_KEYS]),
@@ -320,7 +339,7 @@ class Hausmodell(hass.Hass):
         if accepted:
             self.params = new
         self.fit_info = {
-            "status": "ok",
+            "status": "ok", "version": MODEL_VERSION,
             "zeit": datetime.now().isoformat(timespec="minutes"),
             "tage": round(len(df) / 96, 1),
             "rmse_48h": None if math.isnan(rmse_new) else round(rmse_new if accepted else rmse_old, 3),
@@ -371,10 +390,8 @@ class Hausmodell(hass.Hass):
             self.x = np.array([ti, ts_m if ts_m is not None else ti + 1.0])
 
         # Vorhersage-Schritt (lineares System)
-        A = np.array([[1 - DT / C_i * (1 / R_is + 1 / R_ia), DT / (C_i * R_is)],
-                      [DT / (C_s * R_is), 1 - DT / (C_s * R_is)]])
-        B = np.array([DT / C_i * (ta / R_ia + a_sol * ppv), DT / C_s * q])
-        self.x = A @ self.x + B
+        A, Bd = discretize(p)
+        self.x = A @ self.x + Bd @ np.array([ta, ppv, q])
         Qn = np.diag([0.01, 0.02])
         self.P = A @ self.P @ A.T + Qn
 
