@@ -288,6 +288,9 @@ class Optimierer(hass.Hass):
             if ok.sum() < 48:
                 fit[name] = {"a": 0.0, "g": 1.0, "n": int(ok.sum())}
                 continue
+            if r[ok].max() - r[ok].min() < 0.05:      # Sensor liefert seit Tagen denselben Wert
+                fit[name] = {"a": 0.0, "g": 1.0, "n": int(ok.sum()), "sensor": "eingefroren"}
+                continue
             g, a = np.polyfit(ref[ok].values, r[ok].values, 1)
             if not 0.3 <= g <= 1.5:      # unplausibel -> nur Versatz
                 g, a = 1.0, float(np.median(r[ok] - ref[ok]))
@@ -396,6 +399,22 @@ class Optimierer(hass.Hass):
                                    "aktion": action, "grund": reason, "ziel_vorlauf": vl,
                                    "automatik": auto, "zeit": now.strftime("%H:%M")})
 
+    def _since(self, ent):
+        try:
+            return pd.Timestamp(self.get_state(ent, attribute="last_changed")).tz_convert("Europe/Berlin") \
+                .strftime("%d.%m. %H:%M")
+        except Exception:  # noqa: BLE001
+            return "?"
+
+    def _frozen(self, ent, hours=24):
+        """Raumsensor ohne Wertänderung seit > hours Stunden (Neustarts setzen last_changed nicht zurück,
+        wenn der Wert gleich bleibt – deshalb zusätzlich der Raumabgleich über 10 Tage)."""
+        try:
+            lc = pd.Timestamp(self.get_state(ent, attribute="last_changed"))
+            return (pd.Timestamp.now(tz="UTC") - lc).total_seconds() > hours * 3600
+        except Exception:  # noqa: BLE001
+            return False
+
     def _regler_aktiv(self):
         try:
             return bool(self.get_app("regler").aktiv())
@@ -439,7 +458,8 @@ class Optimierer(hass.Hass):
         decay = np.exp(-k * DT_H / 8.0)
         for name, ent in self.raeume.items():
             f = self.room_fit.get(name, {"a": 0.0, "g": 1.0})
-            meas = self._f(ent)
+            frozen = self._frozen(ent) or f.get("sensor") == "eingefroren"
+            meas = None if frozen else self._f(ent)
             base_now = f["a"] + f["g"] * ti_now
             err = (meas - base_now) if meas is not None else 0.0
             pred = f["a"] + f["g"] * res["ti"] + err * decay
@@ -447,6 +467,7 @@ class Optimierer(hass.Hass):
             self.set_state(f"sensor.prognose_{slug}", state=_s(round(float(pred[23]), 1)), attributes={
                 "friendly_name": f"Prognose {name} (+6 h)", "unit_of_measurement": "°C",
                 "device_class": "temperature", "state_class": "measurement", "icon": "mdi:crystal-ball",
-                "prognose": series(pred, 1), "gemessen_jetzt": meas, "quelle": ent,
+                "prognose": series(pred, 1), "gemessen_jetzt": meas, "quelle": None if frozen else ent,
+                "sensor_status": f"eingefroren ({self._f(ent)} °C seit {self._since(ent)})" if frozen else "ok",
                 "abgleich": f, "min_24h": _nz(pred[:96].min(), 1),
                 "max_24h": _nz(pred[:96].max(), 1)})
