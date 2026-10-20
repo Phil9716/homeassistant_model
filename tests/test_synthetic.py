@@ -91,6 +91,24 @@ def main():
     assert app2.fit_info["rmse_48h"] < 0.15, "Vorhersagefehler (P_el-Variante) zu groß"
     assert abs(s2["H_W_per_K"] - 200) < 30, "Wärmeverlust (P_el-Variante) nicht wiedergefunden"
 
+    # Variante 3: gemessene Wärme (eBUS, kW) erst seit 7 Tagen, davor nichts; P_el absichtlich falsch (×1,5)
+    pth = np.where(np.arange(n) >= n - 96 * 7, Q / 1000.0, np.nan)
+    hist["s.pth"] = [{"last_changed": str(t[i]), "state": str(pth[i])} for i in range(n) if not np.isnan(pth[i])]
+    hist["s.pel"] = mk(pel)
+    args3 = dict(args2, wp_waerme="s.pth", speicher=os.path.join(tempfile.mkdtemp(), "s3.json"))
+    app3 = hm.Hausmodell(args3, hist, dict(states, **{"s.pel": "2000", "s.pth": "6.0"}))
+    app3.initialize()
+    df = app3._dataset(21)
+    last = df.index >= t[n - 96 * 7]
+    ref = np.where(Q > 300, Q, 0)[-last.sum():]
+    assert abs(df["Q"][last].sum() / ref.sum() - 1) < 0.03, "Messwert nicht übernommen"
+    assert app3.q_gemessen > 0 and app3.q_geschaetzt > 0
+    assert app3._heat_now(20.0, 5.0) == 6000.0
+    app3.learn({})
+    s3 = app3._summary()
+    print("gemessene Wärme:", s3, app3.fit_info)
+    assert abs(s3["H_W_per_K"] - 200) < 30
+
 
 if __name__ == "__main__":
     main()

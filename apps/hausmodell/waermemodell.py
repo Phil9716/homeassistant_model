@@ -93,6 +93,8 @@ class Hausmodell(hass.Hass):
         # Heizwärme = elektrische WP-Leistung × COP, nur wenn die WP wirklich in die FBH heizt.
         # Ohne diese Angabe: alter Weg über Durchfluss × Spreizung (unsicher bei stehender Pumpe).
         self.e_pel = a.get("wp_leistung")
+        # Gemessene Wärmeleistung der WP (eBUS CurrentYieldPower, kW) – hat Vorrang vor P_el × COP
+        self.e_pth = a.get("wp_waerme")
         self.pel_min = float(a.get("wp_laeuft_ab_w", 200))
         self.circuits = a["heizkreise"]          # Liste {ruecklauf, durchfluss}
         self.e_bad = a.get("bad_temperatur")
@@ -171,6 +173,10 @@ class Hausmodell(hass.Hass):
         vl = self._f(self.e_vl)
         if vl is None:
             return None
+        if self.e_pth and ti is not None:
+            pth = self._f(self.e_pth)
+            if pth is not None:
+                return float(pth * 1000.0) if (pth > 0.3 and vl - ti > 3.0) else 0.0
         if self.e_pel:
             pel = self._f(self.e_pel, 0.0)
             if not self._running(pel, vl, ti):
@@ -238,7 +244,18 @@ class Hausmodell(hass.Hass):
             pel = self._grid(self._history(self.e_pel, st), idx).fillna(0)
             running = (pel > self.pel_min) & ((vl - df["Ti"]) > 3.0)
             cop = pd.Series(self._cop(vl.fillna(30).values, df["Ta"].fillna(10).values), index=idx)
-            df["Q"] = (pel * cop).where(running, 0.0).fillna(0)
+            q_est = (pel * cop).where(running, 0.0).fillna(0)
+            df["Q"] = q_est
+            df["Q_quelle"] = "geschaetzt"
+            if self.e_pth:
+                # Messung gilt ab dem ersten Wert > 0 (vorher lieferte eBUS nichts)
+                pth = self._grid(self._history(self.e_pth, st), idx) * 1000.0
+                seen = pth.gt(300).cummax()
+                q_meas = pth.where((pth > 300) & ((vl - df["Ti"]) > 3.0), 0.0)
+                ok = seen & pth.notna()
+                df.loc[ok, "Q"] = q_meas[ok].fillna(0)
+                df.loc[ok, "Q_quelle"] = "gemessen"
+                running = running.where(~ok, (pth > 300) & ((vl - df["Ti"]) > 3.0))
             df["Ts_meas"] = rl_mean.where(running & ((vl - rl_mean) > 0.5))
         else:
             q = pd.Series(0.0, index=idx)
@@ -247,6 +264,11 @@ class Hausmodell(hass.Hass):
                 q += (fl * CP_WATER * (vl - rl).clip(lower=0)).fillna(0)
             df["Q"] = q
             df["Ts_meas"] = rl_mean.where((vl - rl_mean) > 1.0)
+        if "Q_quelle" in df:
+            self.q_gemessen = int(((df["Q_quelle"] == "gemessen") & (df["Q"] > 0)).sum())
+            self.q_geschaetzt = int(((df["Q_quelle"] == "geschaetzt") & (df["Q"] > 0)).sum())
+            self.log(f"Heizwärme: {self.q_gemessen} Viertelstunden gemessen (eBUS), {self.q_geschaetzt} geschätzt")
+            df = df.drop(columns="Q_quelle")
         self.log(f"Datensatz: {len(df)} Zeilen, gültig Ti={df['Ti'].notna().sum()}, "
                  f"Ta={df['Ta'].notna().sum()}, Estrich-Messung={df['Ts_meas'].notna().sum()}")
         return df.dropna(subset=["Ti", "Ta"])
@@ -347,6 +369,8 @@ class Hausmodell(hass.Hass):
             "rmse_alt": None if math.isnan(rmse_old) else round(rmse_old, 3),
             "lernfenster": len(starts),
             "uebernommen": accepted,
+            "waerme_gemessen_vh": getattr(self, "q_gemessen", 0),
+            "waerme_geschaetzt_vh": getattr(self, "q_geschaetzt", 0),
         }
         self._save()
         self.log(f"Gelernt: {self.fit_info} -> {self._summary()}")
@@ -430,7 +454,7 @@ class Hausmodell(hass.Hass):
                                    "icon": "mdi:floor-plan", "innovation_raum_K": round(float(innov[0]), 3)})
         self.set_state("sensor.hausmodell_heizleistung", state=_s(round(q)),
                        attributes={"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement",
-                                   "friendly_name": "Hausmodell Heizleistung (Durchfluss × Spreizung)", "icon": "mdi:radiator"})
+                                   "friendly_name": "Hausmodell Heizleistung (eBUS gemessen, sonst geschätzt)", "icon": "mdi:radiator"})
         self._forecast(ta)
 
     def _outdoor_forecast(self, ta_now, steps):
