@@ -161,7 +161,9 @@ regler:
     betriebsart: select.wp_betriebsart_lokal
     min_vorlauf: number.wp_mindest_vorlauf_lokal
     max_vorlauf: number.wp_max_vorlauf_lokal
-    ueberschuss: sensor.pv_uberschuss_ohne_wp
+    einspeisung: sensor.hausleistung_netzeinspeisung
+    netzbezug: sensor.hausleistung_netzbezug
+    akku_leistung: sensor.batteries_lade_entladeleistung
     wp_strom: sensor.wp_leistung_elektrisch
     waerme: sensor.heating_vhp_hmu_currentyieldpower
     vorlauf: sensor.heating_vhp_hmu_flowtemp

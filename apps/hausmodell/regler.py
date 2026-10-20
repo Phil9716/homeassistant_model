@@ -100,6 +100,7 @@ class Regler(hass.Hass):
         except (FileNotFoundError, ValueError, json.JSONDecodeError):
             pass
         self.surplus = deque(maxlen=5)
+        self.batt = None
         self.active = False
         self.run_every(self.step, "now+20", 60)
 
@@ -110,6 +111,23 @@ class Regler(hass.Hass):
             return float(self.get_state(e))
         except (TypeError, ValueError):
             return d
+
+    def _surplus_now(self):
+        """Überschuss ohne WP = Einspeisung − Bezug + Akku-Ladeleistung + WP-Strom.
+        Der Akku-Wert (Huawei) fällt oft kurz aus – dann gilt sein letzter Wert bis zu 5 min."""
+        e = self.e
+        if "einspeisung" not in e:
+            return self._f(e.get("ueberschuss"))
+        now = datetime.now().timestamp()
+        b = self._f(e["akku_leistung"])
+        if b is not None:
+            self.batt = (b, now)
+        if self.batt is None or now - self.batt[1] > 300:
+            return None
+        ein, bez, wp = self._f(e["einspeisung"]), self._f(e["netzbezug"]), self._f(e["wp_strom"])
+        if None in (ein, bez, wp):
+            return None
+        return ein - bez + self.batt[0] + wp
 
     def aktiv(self):
         return self.active
@@ -122,7 +140,7 @@ class Regler(hass.Hass):
 
     def step(self, kwargs):
         e = self.e
-        s = self._f(e["ueberschuss"])
+        s = self._surplus_now()
         if s is not None:
             self.surplus.append(s)
         betrieb = self.get_state(e["betriebsart"])
