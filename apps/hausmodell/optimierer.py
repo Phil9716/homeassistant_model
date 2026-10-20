@@ -305,12 +305,14 @@ class Optimierer(hass.Hass):
         idx = self._timeline()
         ta_now = self._f(self.e["aussen"], 10.0)
         ta, ta_ok = self._ta_forecast(idx, ta_now)
-        pv_raw, pv_ok = self._pv_forecast(idx)
-        pv = pv_raw
-        try:
-            pv = np.clip(self.get_app("prognose").pv_korrektur(idx, pv_raw), 0, None)
+        try:   # Ost/Süd/West einzeln korrigiert, hier als Summe
+            pv_raw, pv = self.get_app("prognose").pv_forecast(idx)
+            pv = np.clip(pv, 0, None)
+            pv_ok = bool(pv_raw.sum() > 0)
         except Exception as ex:  # noqa: BLE001
-            self.log(f"PV-Korrektur nicht verfügbar: {ex}", level="DEBUG")
+            self.log(f"PV-Prognose je Fläche nicht verfügbar: {ex}", level="WARNING")
+            pv_raw, pv_ok = self._pv_forecast(idx)
+            pv = pv_raw
         self._pv_raw = pv_raw
         base = self._base_load(idx, haus)
         if wp is not None:

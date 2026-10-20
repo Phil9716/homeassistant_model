@@ -121,8 +121,17 @@ prognose:
   verbrauch: sensor.verbrauch
   wp_leistung: sensor.wp_leistung_elektrisch
   ist:
-    pv_roh: sensor.wechselrichter_master_pv_erzeugung_summe
     raum: sensor.leitraum_temperatur_mittel
+  pv_flaechen:
+    ost:
+      ist: sensor.garage_ost
+      prognose: [sensor.energy_production_today, sensor.energy_production_tomorrow_ost, sensor.energy_production_d2]
+    sued:
+      ist: sensor.sud_gesamt
+      prognose: [sensor.energy_production_today_3, sensor.energy_production_tomorrow_sued, sensor.energy_production_d2_3]
+    west:
+      ist: sensor.garage_west
+      prognose: [sensor.energy_production_today_2, sensor.energy_production_tomorrow_west, sensor.energy_production_d2_2]
   raeume:
     Wohnzimmer: sensor.prognose_wohnzimmer
     Küche: sensor.prognose_kueche
