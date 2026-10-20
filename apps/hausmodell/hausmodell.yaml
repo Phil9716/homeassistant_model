@@ -33,7 +33,7 @@ hausmodell:
 hausmodell_updater:
   module: updater
   class: Updater
-  dateien: [waermemodell.py, wpmodell.py, updater.py, hausmodell.yaml]
+  dateien: [waermemodell.py, wpmodell.py, optimierer.py, updater.py, hausmodell.yaml]
 
 wpmodell:
   module: wpmodell
@@ -52,3 +52,53 @@ wpmodell:
     - vhp/hmu/CurrentYieldPower/get
     - vhp/hmu/BuildingCircuitFlow/get
     - vhp/hmu/FlowTemp/get
+
+optimierer:
+  module: optimierer
+  class: Optimierer
+  strompreis: 0.30              # €/kWh, fest; Einspeisung wird mit 0 bewertet
+  akku_nutzbar_kwh: 7.6         # gemessen: 49 % SoC lieferten nachts 3,7 kWh
+  akku_leistung_kw: 5.0
+  akku_eta_laden: 0.95          # zusammen ~0,80 hin und zurück (Gesamtzähler 1996/1603 kWh)
+  akku_eta_entladen: 0.85
+  heizleistung_max_kw: 8.0
+  t_min_tag: 21.0               # Leiträume 06–22 Uhr
+  t_min_nacht: 20.5
+  t_max: 23.5
+  tag_von: 6
+  tag_bis: 22
+  vorlauf_plan: 33              # Vorlauf für die COP-Abschätzung
+  einschalt_schwelle_kw: 1.5
+  mindestlaufzeit_min: 60
+  mindestpause_min: 30
+  fbh_kw_pro_k: 0.6             # Wärmeabgabe Wasser→Estrich je K Übertemperatur (Startwert)
+  entitaeten:
+    automatik: input_boolean.optimierer_automatik
+    pv_boost_automatik: input_boolean.pv_boost_automatik
+    pv_boost_aktiv: input_boolean.pv_boost_aktiv
+    betriebsart: select.wp_betriebsart_lokal
+    max_vorlauf: number.wp_max_vorlauf_lokal
+    min_vorlauf: number.wp_mindest_vorlauf_lokal
+    ebus_ok: binary_sensor.ebus_daten_aktuell
+    akku_soc: sensor.batteries_batterieladung
+    aussen: sensor.heating_vhp_broadcast_outsidetemp
+    wetter: weather.baesweiler
+    verbrauch: sensor.verbrauch
+  pv_prognose:
+    - sensor.energy_production_today
+    - sensor.energy_production_today_2
+    - sensor.energy_production_today_3
+    - sensor.energy_production_tomorrow_ost
+    - sensor.energy_production_tomorrow_west
+    - sensor.energy_production_tomorrow_sued
+    - sensor.energy_production_d2
+    - sensor.energy_production_d2_2
+    - sensor.energy_production_d2_3
+  raeume:
+    Wohnzimmer: sensor.temperatur_wohnzimmer_temperature
+    Küche: sensor.temperatur_kuche_temperature
+    Bad: sensor.temperatur_badezimmer_temperature
+    Schlafzimmer: sensor.temperatur_schlafzimmer_temperature
+    Kinderzimmer: sensor.temperatur_kinderzimmer_temperature
+    Bad Keller: sensor.badezimmer_keller_temperature
+    Flur: sensor.flur_philipp_bewegungsmelder_temperatur

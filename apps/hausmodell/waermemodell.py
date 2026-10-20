@@ -39,8 +39,9 @@ DEFAULT_PARAMS = {
     "a_sol": 0.15,    # W/W   Anteil PV-Leistung als Solargewinn
 }
 PARAM_KEYS = list(DEFAULT_PARAMS.keys())
-BOUNDS_LO = np.log([3e-4, 1.5e-3, 1e6, 5e6, 0.0001])
-BOUNDS_HI = np.log([1e-2, 3e-2, 5e7, 3e8, 2.0])
+# Physikalisch plausible Bereiche (EFH mit FBH): H 60–400 W/K, Raum 0,5–5 kWh/K, Estrich 2–25 kWh/K
+BOUNDS_LO = np.log([5e-4, 2.5e-3, 1.8e6, 7.2e6, 0.0001])
+BOUNDS_HI = np.log([5e-3, 1.7e-2, 1.8e7, 9.0e7, 1.0])
 
 
 def _s(value):
@@ -102,6 +103,10 @@ class Hausmodell(hass.Hass):
             with open(self.store) as f:
                 s = json.load(f)
             self.params.update(s.get("params", {}))
+            # ältere Lernstände in die aktuellen Grenzen holen
+            lo, hi = np.exp(BOUNDS_LO), np.exp(BOUNDS_HI)
+            for i, k in enumerate(PARAM_KEYS):
+                self.params[k] = float(min(max(self.params[k], lo[i]), hi[i]))
             self.fit_info = s.get("fit_info", self.fit_info)
             self.log("Gespeicherte Modellparameter geladen")
         except FileNotFoundError:

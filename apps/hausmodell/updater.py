@@ -17,7 +17,7 @@ class Updater(hass.Hass):
     def initialize(self):
         self.repo = self.args.get("repo", "Phil9716/homeassistant_model")
         self.subdir = self.args.get("pfad", "apps/hausmodell")
-        self.files = self.args.get("dateien", ["waermemodell.py", "wpmodell.py", "updater.py", "hausmodell.yaml"])
+        self.files = self.args.get("dateien", ["waermemodell.py", "wpmodell.py", "optimierer.py", "updater.py", "hausmodell.yaml"])
         self.dir = os.path.dirname(os.path.abspath(__file__))
         self.listen_event(self.update, "hausmodell_update")
         self._publish("bereit", {})
