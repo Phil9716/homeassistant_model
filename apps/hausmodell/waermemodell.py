@@ -175,7 +175,8 @@ class Hausmodell(hass.Hass):
             return None
         if self.e_pth and ti is not None:
             pth = self._f(self.e_pth)
-            if pth is not None:
+            pel_now = self._f(self.e_pel, 0.0) if self.e_pel else 0.0
+            if pth is not None and not (pth < 0.3 and pel_now > max(2 * self.pel_min, 500)):
                 return float(pth * 1000.0) if (pth > 0.3 and vl - ti > 3.0) else 0.0
         if self.e_pel:
             pel = self._f(self.e_pel, 0.0)
@@ -252,7 +253,9 @@ class Hausmodell(hass.Hass):
                 pth = self._grid(self._history(self.e_pth, st), idx) * 1000.0
                 seen = pth.gt(300).cummax()
                 q_meas = pth.where((pth > 300) & ((vl - df["Ti"]) > 3.0), 0.0)
-                ok = seen & pth.notna()
+                # eBUS meldet 0, obwohl Strom fließt -> Abfrage ausgefallen, dann Schätzung behalten
+                stale = (pth.fillna(0) < 300) & (pel > max(2 * self.pel_min, 500))
+                ok = seen & pth.notna() & ~stale
                 df.loc[ok, "Q"] = q_meas[ok].fillna(0)
                 df.loc[ok, "Q_quelle"] = "gemessen"
                 running = running.where(~ok, (pth > 300) & ((vl - df["Ti"]) > 3.0))
