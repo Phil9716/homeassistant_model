@@ -174,6 +174,7 @@ class Optimierer(hass.Hass):
         self.base_profile = None
         self.last_switch = None
         self.last_cmd = None
+        self.q_next, self.t_min_now = None, None
         self.run_every(self.optimize, "now+90", DT_MIN * 60)
         self.surplus = deque(maxlen=10)       # gemessener PV-Überschuss der letzten 10 min
         self.run_every(self.sample_surplus, "now+5", 60)
@@ -344,6 +345,7 @@ class Optimierer(hass.Hass):
 
     def _dispatch(self, res, x0, t_min_now):
         q_next = float(np.mean(res["q"][:4]))
+        self.q_next, self.t_min_now = q_next, t_min_now      # für den Überschussregler
         want_on = q_next >= self.schwelle_kw
         ts = float(x0[1])
         vl_min = max(30.0, self._f(self.e["min_vorlauf"], 30.0))   # Max-Vorlauf nie unter Min-Vorlauf
@@ -383,7 +385,9 @@ class Optimierer(hass.Hass):
             else:
                 action = f"AUS geplant, Mindestlaufzeit noch {self.min_lauf - mins:.0f} min"
         elif want_on and is_on:
-            if self._set_vl(vl):
+            if self._regler_aktiv():
+                action = "läuft – Vorlauf führt der Überschussregler"
+            elif self._set_vl(vl):
                 action = f"Max-Vorlauf → {vl} °C"
         if action not in ("keine",) and not action.startswith("Automatik"):
             self.log(f"Optimierer: {action} ({reason})")
@@ -391,6 +395,12 @@ class Optimierer(hass.Hass):
                        attributes={"friendly_name": "Optimierer Entscheidung", "icon": "mdi:robot",
                                    "aktion": action, "grund": reason, "ziel_vorlauf": vl,
                                    "automatik": auto, "zeit": now.strftime("%H:%M")})
+
+    def _regler_aktiv(self):
+        try:
+            return bool(self.get_app("regler").aktiv())
+        except Exception:  # noqa: BLE001
+            return False
 
     def _set_vl(self, vl):
         cur = self._f(self.e["max_vorlauf"])

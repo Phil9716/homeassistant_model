@@ -36,7 +36,7 @@ hausmodell:
 hausmodell_updater:
   module: updater
   class: Updater
-  dateien: [waermemodell.py, wpmodell.py, optimierer.py, prognose.py, updater.py, hausmodell.yaml]
+  dateien: [waermemodell.py, wpmodell.py, optimierer.py, prognose.py, regler.py, updater.py, hausmodell.yaml]
 
 wpmodell:
   module: wpmodell
@@ -141,3 +141,32 @@ prognose:
     Kinderzimmer: sensor.prognose_kinderzimmer
     Bad Keller: sensor.prognose_bad_keller
     Flur: sensor.prognose_flur
+
+regler:
+  module: regler
+  class: Regler
+  speicher: /config/regler_state.json
+  parameter:
+    reserve_w: 200        # so viel Überschuss bleibt frei (Messrauschen, kurze Wolken)
+    p_max_w: 4000         # höchstens so viel Strom für die WP
+    vl_min: 25
+    vl_max: 40            # Estrich-Grenze
+    ki: 0.15              # K Vorlauf je kW Abweichung und Minute
+    korr_max: 6
+    schreib_min: 3
+  entitaeten:
+    automatik: input_boolean.optimierer_automatik
+    regler_an: input_boolean.ueberschussregler
+    ebus_ok: binary_sensor.ebus_daten_aktuell
+    betriebsart: select.wp_betriebsart_lokal
+    min_vorlauf: number.wp_mindest_vorlauf_lokal
+    max_vorlauf: number.wp_max_vorlauf_lokal
+    ueberschuss: sensor.pv_uberschuss_ohne_wp
+    wp_strom: sensor.wp_leistung_elektrisch
+    waerme: sensor.heating_vhp_hmu_currentyieldpower
+    vorlauf: sensor.heating_vhp_hmu_flowtemp
+    status: sensor.heating_vhp_hmu_rundatastatuscode
+    luft: sensor.heating_vhp_hmu_rundataairinlettemp
+    aussen: sensor.heating_vhp_broadcast_outsidetemp
+    raum_min: sensor.leitraum_temperatur_minimum
+    raum_max: sensor.leitraum_temperatur_maximum
