@@ -156,7 +156,7 @@ regler:
     schreib_min: 3
   entitaeten:
     automatik: input_boolean.optimierer_automatik
-    regler_an: input_boolean.ueberschussregler
+    regler_an: input_boolean.uberschussregler
     ebus_ok: binary_sensor.ebus_daten_aktuell
     betriebsart: select.wp_betriebsart_lokal
     min_vorlauf: number.wp_mindest_vorlauf_lokal
