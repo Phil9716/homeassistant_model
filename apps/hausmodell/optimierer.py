@@ -17,6 +17,7 @@ Umsetzung (nur mit Automatik-Schalter und frischen eBUS-Daten):
   sonst „Aus“. Mindestlaufzeit / Mindestpause gegen Takten.
 """
 
+from collections import deque
 from datetime import datetime
 
 import appdaemon.plugins.hass.hassapi as hass
@@ -163,6 +164,8 @@ class Optimierer(hass.Hass):
         self.min_pause = int(a.get("mindestpause_min", 30))
         self.ua_fbh = float(a.get("fbh_kw_pro_k", 1.0))
         self.max_rmse = float(a.get("lernmodell_max_fehler_k", 0.5))
+        self.ein_ueberschuss = float(a.get("einschalt_ueberschuss_w", 1500))
+        self.notfall_k = float(a.get("komfort_notfall_k", 1.5))
         self.modell_info = ""
         self.e = a["entitaeten"]
         self.raeume = a.get("raeume", {})
@@ -172,6 +175,8 @@ class Optimierer(hass.Hass):
         self.last_switch = None
         self.last_cmd = None
         self.run_every(self.optimize, "now+90", DT_MIN * 60)
+        self.surplus = deque(maxlen=10)       # gemessener PV-Überschuss der letzten 10 min
+        self.run_every(self.sample_surplus, "now+5", 60)
         self.run_daily(self.fit_rooms, "03:15:00")
         self.listen_event(lambda *x: self.optimize({}), "optimierer_jetzt")
         self.listen_state(self.on_automatik, self.e["automatik"])
@@ -195,6 +200,11 @@ class Optimierer(hass.Hass):
             return self.get_app("wpmodell")
         except Exception:  # noqa: BLE001
             return None
+
+    def sample_surplus(self, kwargs):
+        v = self._f(self.e["ueberschuss"])
+        if v is not None:
+            self.surplus.append(v)
 
     def on_automatik(self, entity, attribute, old, new, kwargs):
         if new == "on":
@@ -295,7 +305,13 @@ class Optimierer(hass.Hass):
         idx = self._timeline()
         ta_now = self._f(self.e["aussen"], 10.0)
         ta, ta_ok = self._ta_forecast(idx, ta_now)
-        pv, pv_ok = self._pv_forecast(idx)
+        pv_raw, pv_ok = self._pv_forecast(idx)
+        pv = pv_raw
+        try:
+            pv = np.clip(self.get_app("prognose").pv_korrektur(idx, pv_raw), 0, None)
+        except Exception as ex:  # noqa: BLE001
+            self.log(f"PV-Korrektur nicht verfügbar: {ex}", level="DEBUG")
+        self._pv_raw = pv_raw
         base = self._base_load(idx, haus)
         if wp is not None:
             cop = np.array([max(wp.cop(self.vl_plan, t), 1.5) for t in ta])
@@ -312,10 +328,19 @@ class Optimierer(hass.Hass):
                            attributes={"friendly_name": "Optimierer Plan", "icon": "mdi:alert"})
             return
         self._publish(idx, res, pv, base, ta, cop, soc, pv_ok, ta_ok, haus)
-        self._dispatch(res, x0)
+        self._dispatch(res, x0, t_min[0])
 
     # ------------------------------------------------------------- dispatch
-    def _dispatch(self, res, x0):
+    def _hold_until(self):
+        """'Nicht ausschalten bis' (input_datetime) – None, wenn nicht gesetzt oder vorbei."""
+        ts = self.get_state(self.e.get("nicht_aus_bis", ""), attribute="timestamp") if self.e.get("nicht_aus_bis") else None
+        try:
+            t = datetime.fromtimestamp(float(ts))
+        except (TypeError, ValueError):
+            return None
+        return t if t > datetime.now() else None
+
+    def _dispatch(self, res, x0, t_min_now):
         q_next = float(np.mean(res["q"][:4]))
         want_on = q_next >= self.schwelle_kw
         ts = float(x0[1])
@@ -334,14 +359,23 @@ class Optimierer(hass.Hass):
         elif not ebus_ok:
             action = "eBUS ohne frische Daten – nichts geschaltet"
         elif want_on and not is_on:
-            if mins >= self.min_pause:
+            surplus = float(np.mean(self.surplus)) if len(self.surplus) >= 5 else None
+            ti_min = self._f(self.e["raum_min"])
+            notfall = ti_min is not None and ti_min < t_min_now - self.notfall_k
+            if not notfall and (surplus is None or surplus < self.ein_ueberschuss):
+                action = (f"EIN geplant, aber gemessener Überschuss "
+                          f"{'–' if surplus is None else f'{surplus:.0f} W'} < {self.ein_ueberschuss:.0f} W")
+            elif mins >= self.min_pause:
                 self._set_vl(vl)
                 self.call_service("select/select_option", entity_id=self.e["betriebsart"], option="Manuell")
                 self.last_switch, action = now, f"EIN (Max-Vorlauf {vl} °C)"
             else:
                 action = f"EIN geplant, Mindestpause noch {self.min_pause - mins:.0f} min"
         elif not want_on and is_on:
-            if mins >= self.min_lauf:
+            hold = self._hold_until()
+            if hold is not None:
+                action = f"AUS geplant, gesperrt bis {hold.strftime('%H:%M')}"
+            elif mins >= self.min_lauf:
                 self.call_service("select/select_option", entity_id=self.e["betriebsart"], option="Aus")
                 self.last_switch, action = now, "AUS"
             else:
@@ -376,7 +410,8 @@ class Optimierer(hass.Hass):
             "icon": "mdi:chart-timeline-variant", "state_class": "measurement",
             "heizleistung_kw": series(res["q"]), "wp_strom_kw": series(res["p_el"]),
             "netzbezug_kw": series(res["g"]), "akku_kwh": series(res["soc"]),
-            "pv_kw": series(pv / 1000.0), "grundlast_kw": series(base),
+            "pv_kw": series(pv / 1000.0), "pv_kw_roh": series(self._pv_raw / 1000.0),
+            "grundlast_kw": series(base),
             "raum_plan": series(res["ti"]), "raum_ohne_heizen": series(res["ti_frei"]),
             "aussen": series(ta, 1), "cop": series(cop),
             "waerme_24h_kwh": _nz(res["q"][day].sum() * DT_H, 1),
